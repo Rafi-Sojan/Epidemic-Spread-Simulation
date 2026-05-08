@@ -1,0 +1,12 @@
+# Build outputs
+*.exe
+*.o
+*.obj
+
+# Generated simulation and model artifacts
+results/*.csv
+results/models/
+
+# Python cache
+__pycache__/
+*.py[cod]
