@@ -132,9 +132,17 @@ Run the interactive dashboard:
 streamlit run app.py
 ```
 
-The dashboard lets you adjust scenario inputs, view predicted severity and peak
-infection count, plot daily infection curves, inspect generated CSV data, and
-visualize node-level graph spread.
+The dashboard lets you adjust scenario inputs, apply policy controls, view
+predicted severity and peak infection count, plot daily infection curves,
+inspect generated CSV data, and visualize node-level graph spread with
+NetworkX and Plotly.
+
+Policy controls include:
+
+- lockdown strength
+- mask adoption
+- daily vaccination rate
+- travel restriction
 
 ## Current Model Tasks
 

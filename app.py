@@ -5,7 +5,9 @@ import subprocess
 from pathlib import Path
 
 import joblib
+import networkx as nx
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -95,23 +97,42 @@ def simulate_single_curve(
     infection_rate: float,
     recovery_rate: float,
     days: int,
+    lockdown_strength: float,
+    mask_adoption: float,
+    vaccination_rate: float,
+    travel_restriction: float,
 ) -> pd.DataFrame:
     susceptible = population - initial_infected
     infected = initial_infected
     recovered = 0
+    vaccinated = 0
     rows = []
 
     for day in range(days + 1):
+        policy_effect = (
+            1.0
+            - 0.55 * lockdown_strength
+            - 0.35 * mask_adoption
+            - 0.20 * travel_restriction
+        )
+        effective_infection_rate = max(0.0, infection_rate * policy_effect)
+
         rows.append(
             {
                 "day": day,
                 "susceptible": round(susceptible),
                 "infected": round(infected),
                 "recovered": round(recovered),
+                "vaccinated": round(vaccinated),
+                "effective_infection_rate": effective_infection_rate,
             }
         )
 
-        new_infections = infection_rate * susceptible * infected / population
+        new_vaccinations = min(susceptible, population * vaccination_rate)
+        susceptible -= new_vaccinations
+        vaccinated += new_vaccinations
+
+        new_infections = effective_infection_rate * susceptible * infected / population
         new_recoveries = recovery_rate * infected
         new_infections = min(new_infections, susceptible)
         new_recoveries = min(new_recoveries, infected)
@@ -140,6 +161,88 @@ def graph_snapshot(graph_data: pd.DataFrame, scenario_id: int, day: int) -> pd.D
     return frame
 
 
+def build_graph_figure(snapshot: pd.DataFrame, edges: pd.DataFrame, scenario_id: int) -> go.Figure:
+    graph = nx.Graph()
+    for _, row in snapshot.iterrows():
+        graph.add_node(
+            int(row["node_id"]),
+            infected=int(row["infected"]),
+            population=int(row["population"]),
+            infection_share=float(row["infection_share"]),
+        )
+
+    scenario_edges = edges[edges["scenario_id"] == scenario_id]
+    for _, row in scenario_edges.iterrows():
+        graph.add_edge(
+            int(row["source_node"]),
+            int(row["target_node"]),
+            weight=float(row["weight"]),
+        )
+
+    positions = nx.circular_layout(graph)
+
+    edge_x = []
+    edge_y = []
+    for source, target in graph.edges():
+        x0, y0 = positions[source]
+        x1, y1 = positions[target]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+
+    ordered_nodes = sorted(graph.nodes())
+    node_x = [positions[node][0] for node in ordered_nodes]
+    node_y = [positions[node][1] for node in ordered_nodes]
+    infected = [graph.nodes[node]["infected"] for node in ordered_nodes]
+    infection_share = [graph.nodes[node]["infection_share"] for node in ordered_nodes]
+    labels = [
+        f"Region {node}<br>Infected: {graph.nodes[node]['infected']:,}"
+        f"<br>Population: {graph.nodes[node]['population']:,}"
+        for node in ordered_nodes
+    ]
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=edge_x,
+            y=edge_y,
+            mode="lines",
+            line={"width": 2, "color": "#9aa4b2"},
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=node_x,
+            y=node_y,
+            mode="markers+text",
+            text=[str(node) for node in ordered_nodes],
+            textposition="middle center",
+            hovertext=labels,
+            hoverinfo="text",
+            marker={
+                "size": [max(22, min(70, value / 4)) for value in infected],
+                "color": infection_share,
+                "colorscale": "YlOrRd",
+                "showscale": True,
+                "colorbar": {"title": "Infected share"},
+                "line": {"width": 2, "color": "#1f2937"},
+            },
+            textfont={"color": "#111827", "size": 13},
+            showlegend=False,
+        )
+    )
+    figure.update_layout(
+        height=520,
+        margin={"l": 10, "r": 10, "t": 10, "b": 10},
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+    return figure
+
+
 st.title("Epidemic Spread Simulation and ML Dashboard")
 
 with st.sidebar:
@@ -149,6 +252,12 @@ with st.sidebar:
     infection_rate = st.slider("Infection rate", 0.01, 0.60, 0.22, step=0.01)
     recovery_rate = st.slider("Recovery rate", 0.01, 0.30, 0.08, step=0.01)
     days = st.slider("Days", 30, 240, 120)
+
+    with st.expander("Policy controls", expanded=True):
+        lockdown_strength = st.slider("Lockdown strength", 0.0, 1.0, 0.20, step=0.05)
+        mask_adoption = st.slider("Mask adoption", 0.0, 1.0, 0.35, step=0.05)
+        vaccination_rate = st.slider("Daily vaccination rate", 0.0, 0.02, 0.002, step=0.001)
+        travel_restriction = st.slider("Travel restriction", 0.0, 1.0, 0.15, step=0.05)
 
     st.divider()
     scenario_count = st.number_input("Simulation rows", min_value=10, max_value=5000, value=250, step=10)
@@ -169,7 +278,17 @@ inputs = {
 }
 
 severity, peak_infected = predict_from_classic_models(inputs)
-curve = simulate_single_curve(population, initial_infected, infection_rate, recovery_rate, days)
+curve = simulate_single_curve(
+    population,
+    initial_infected,
+    infection_rate,
+    recovery_rate,
+    days,
+    lockdown_strength,
+    mask_adoption,
+    vaccination_rate,
+    travel_restriction,
+)
 
 metric_columns = st.columns(4)
 metric_columns[0].metric("Predicted severity", severity or "model missing")
@@ -187,11 +306,24 @@ tab_overview, tab_data, tab_graph, tab_models = st.tabs(
 with tab_overview:
     left, right = st.columns([2, 1])
     with left:
-        st.subheader("Daily Infection Curve")
-        st.line_chart(curve.set_index("day")[["susceptible", "infected", "recovered"]])
+        st.subheader("Daily Infection Curve With Policies")
+        st.line_chart(curve.set_index("day")[["susceptible", "infected", "recovered", "vaccinated"]])
     with right:
         st.subheader("Selected Inputs")
         st.dataframe(pd.DataFrame([inputs]), hide_index=True, use_container_width=True)
+        st.subheader("Policy Effect")
+        policy_frame = pd.DataFrame(
+            [
+                {
+                    "lockdown_strength": lockdown_strength,
+                    "mask_adoption": mask_adoption,
+                    "daily_vaccination_rate": vaccination_rate,
+                    "travel_restriction": travel_restriction,
+                    "average_effective_infection_rate": curve["effective_infection_rate"].mean(),
+                }
+            ]
+        )
+        st.dataframe(policy_frame, hide_index=True, use_container_width=True)
 
 with tab_data:
     if SUMMARY_PATH.exists():
@@ -211,8 +343,9 @@ with tab_data:
         st.info("Generate simulation data to preview CSV outputs.")
 
 with tab_graph:
-    if GRAPH_PATH.exists():
+    if GRAPH_PATH.exists() and EDGE_PATH.exists():
         graph_data = load_csv(GRAPH_PATH)
+        edges = load_csv(EDGE_PATH)
         scenario_ids = sorted(graph_data["scenario_id"].unique())
         selected_graph_scenario = st.selectbox("Graph scenario", scenario_ids)
         scenario_days = sorted(
@@ -227,13 +360,8 @@ with tab_graph:
         snapshot = graph_snapshot(graph_data, int(selected_graph_scenario), int(selected_day))
 
         if not snapshot.empty:
-            st.scatter_chart(
-                snapshot,
-                x="x",
-                y="y",
-                size="infected",
-                color="infection_share",
-            )
+            figure = build_graph_figure(snapshot, edges, int(selected_graph_scenario))
+            st.plotly_chart(figure, use_container_width=True)
             st.dataframe(
                 snapshot[
                     ["node", "population", "susceptible", "infected", "recovered", "infection_share"]
