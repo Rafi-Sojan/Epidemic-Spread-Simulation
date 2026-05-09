@@ -35,8 +35,18 @@ class DailyInfectionLSTM(nn.Module):
 
 
 def build_sequences(data: pd.DataFrame, sequence_length: int) -> tuple[np.ndarray, np.ndarray, float]:
-    feature_columns = ["susceptible", "infected", "recovered", "new_infections", "new_recoveries"]
-    scale = float(data[["susceptible", "infected", "recovered"]].sum(axis=1).max())
+    feature_columns = [
+        "susceptible",
+        "infected",
+        "recovered",
+        "deceased",
+        "vaccinated",
+        "new_infections",
+        "new_recoveries",
+        "new_deaths",
+        "new_vaccinations",
+    ]
+    scale = float(data[["susceptible", "infected", "recovered", "deceased", "vaccinated"]].sum(axis=1).max())
     sequences: list[np.ndarray] = []
     targets: list[float] = []
 

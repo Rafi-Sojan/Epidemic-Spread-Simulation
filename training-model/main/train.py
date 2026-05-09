@@ -19,6 +19,11 @@ FEATURE_COLUMNS = [
     "initial_infected",
     "infection_rate",
     "recovery_rate",
+    "mortality_rate",
+    "lockdown_strength",
+    "mask_adoption",
+    "vaccination_rate",
+    "travel_restriction",
     "days",
 ]
 
@@ -88,20 +93,48 @@ def train_regressor(train_data: pd.DataFrame, test_data: pd.DataFrame) -> Pipeli
     return model
 
 
+def train_death_regressor(train_data: pd.DataFrame, test_data: pd.DataFrame) -> Pipeline:
+    model = Pipeline(
+        steps=[
+            ("preprocess", build_preprocessor()),
+            (
+                "model",
+                RandomForestRegressor(
+                    n_estimators=250,
+                    max_depth=14,
+                    random_state=42,
+                ),
+            ),
+        ]
+    )
+
+    model.fit(train_data[FEATURE_COLUMNS], train_data["total_deaths"])
+    predictions = model.predict(test_data[FEATURE_COLUMNS])
+
+    print("\nTotal deaths regression")
+    print(f"MAE: {mean_absolute_error(test_data['total_deaths'], predictions):.2f}")
+    print(f"R2: {r2_score(test_data['total_deaths'], predictions):.3f}")
+    return model
+
+
 def main() -> None:
     train_data, test_data = load_data()
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
     classifier = train_classifier(train_data, test_data)
     regressor = train_regressor(train_data, test_data)
+    death_regressor = train_death_regressor(train_data, test_data)
 
     classifier_path = MODEL_DIR / "severity_classifier.joblib"
     regressor_path = MODEL_DIR / "peak_infected_regressor.joblib"
+    death_regressor_path = MODEL_DIR / "total_deaths_regressor.joblib"
     joblib.dump(classifier, classifier_path)
     joblib.dump(regressor, regressor_path)
+    joblib.dump(death_regressor, death_regressor_path)
 
     print(f"\nSaved classifier to {classifier_path}")
     print(f"Saved regressor to {regressor_path}")
+    print(f"Saved death regressor to {death_regressor_path}")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@
 # Generated simulation and model artifacts
 results/*.csv
 results/models/
+results/real_world/
+results/research/
 
 # Python cache
 __pycache__/

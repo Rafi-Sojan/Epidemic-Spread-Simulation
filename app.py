@@ -20,14 +20,22 @@ EDGE_PATH = ROOT / "results" / "graph_edges.csv"
 MODEL_DIR = ROOT / "results" / "models"
 CLASSIFIER_PATH = MODEL_DIR / "severity_classifier.joblib"
 REGRESSOR_PATH = MODEL_DIR / "peak_infected_regressor.joblib"
+DEATH_REGRESSOR_PATH = MODEL_DIR / "total_deaths_regressor.joblib"
 DAILY_LSTM_PATH = MODEL_DIR / "daily_infection_lstm.pt"
 GRAPH_LSTM_PATH = MODEL_DIR / "graph_lstm.pt"
+REAL_WORLD_MODEL_PATH = MODEL_DIR / "real_world_covid_forecaster.joblib"
+REAL_WORLD_METRICS_PATH = ROOT / "results" / "real_world" / "real_world_metrics.csv"
 
 FEATURE_COLUMNS = [
     "population",
     "initial_infected",
     "infection_rate",
     "recovery_rate",
+    "mortality_rate",
+    "lockdown_strength",
+    "mask_adoption",
+    "vaccination_rate",
+    "travel_restriction",
     "days",
 ]
 
@@ -75,10 +83,11 @@ def run_simulator(scenario_count: int) -> tuple[bool, str]:
     return True, result.stdout
 
 
-def predict_from_classic_models(inputs: dict[str, float]) -> tuple[str | None, float | None]:
+def predict_from_classic_models(inputs: dict[str, float]) -> tuple[str | None, float | None, float | None]:
     feature_frame = pd.DataFrame([inputs], columns=FEATURE_COLUMNS)
     severity = None
     peak_infected = None
+    total_deaths = None
 
     if CLASSIFIER_PATH.exists():
         classifier = load_joblib_model(CLASSIFIER_PATH)
@@ -88,7 +97,11 @@ def predict_from_classic_models(inputs: dict[str, float]) -> tuple[str | None, f
         regressor = load_joblib_model(REGRESSOR_PATH)
         peak_infected = float(regressor.predict(feature_frame)[0])
 
-    return severity, peak_infected
+    if DEATH_REGRESSOR_PATH.exists():
+        death_regressor = load_joblib_model(DEATH_REGRESSOR_PATH)
+        total_deaths = float(death_regressor.predict(feature_frame)[0])
+
+    return severity, peak_infected, total_deaths
 
 
 def simulate_single_curve(
@@ -96,6 +109,7 @@ def simulate_single_curve(
     initial_infected: int,
     infection_rate: float,
     recovery_rate: float,
+    mortality_rate: float,
     days: int,
     lockdown_strength: float,
     mask_adoption: float,
@@ -105,6 +119,7 @@ def simulate_single_curve(
     susceptible = population - initial_infected
     infected = initial_infected
     recovered = 0
+    deceased = 0
     vaccinated = 0
     rows = []
 
@@ -123,6 +138,7 @@ def simulate_single_curve(
                 "susceptible": round(susceptible),
                 "infected": round(infected),
                 "recovered": round(recovered),
+                "deceased": round(deceased),
                 "vaccinated": round(vaccinated),
                 "effective_infection_rate": effective_infection_rate,
             }
@@ -133,13 +149,17 @@ def simulate_single_curve(
         vaccinated += new_vaccinations
 
         new_infections = effective_infection_rate * susceptible * infected / population
-        new_recoveries = recovery_rate * infected
         new_infections = min(new_infections, susceptible)
-        new_recoveries = min(new_recoveries, infected)
 
         susceptible -= new_infections
-        infected += new_infections - new_recoveries
+        infected_after_spread = infected + new_infections
+        new_deaths = min(mortality_rate * infected_after_spread, infected_after_spread)
+        infected_after_deaths = infected_after_spread - new_deaths
+        new_recoveries = min(recovery_rate * infected_after_deaths, infected_after_deaths)
+
+        infected = infected_after_deaths - new_recoveries
         recovered += new_recoveries
+        deceased += new_deaths
 
     return pd.DataFrame(rows)
 
@@ -157,6 +177,7 @@ def graph_snapshot(graph_data: pd.DataFrame, scenario_id: int, day: int) -> pd.D
     frame["x"] = frame["angle"].apply(math.cos)
     frame["y"] = frame["angle"].apply(math.sin)
     frame["infection_share"] = frame["infected"] / frame["population"]
+    frame["death_share"] = frame["deceased"] / frame["population"]
     frame["node"] = frame["node_id"].apply(lambda node: f"Region {node}")
     return frame
 
@@ -169,6 +190,7 @@ def build_graph_figure(snapshot: pd.DataFrame, edges: pd.DataFrame, scenario_id:
             infected=int(row["infected"]),
             population=int(row["population"]),
             infection_share=float(row["infection_share"]),
+            deceased=int(row["deceased"]),
         )
 
     scenario_edges = edges[edges["scenario_id"] == scenario_id]
@@ -196,6 +218,7 @@ def build_graph_figure(snapshot: pd.DataFrame, edges: pd.DataFrame, scenario_id:
     infection_share = [graph.nodes[node]["infection_share"] for node in ordered_nodes]
     labels = [
         f"Region {node}<br>Infected: {graph.nodes[node]['infected']:,}"
+        f"<br>Deceased: {graph.nodes[node]['deceased']:,}"
         f"<br>Population: {graph.nodes[node]['population']:,}"
         for node in ordered_nodes
     ]
@@ -251,6 +274,7 @@ with st.sidebar:
     initial_infected = st.slider("Initial infected", 1, 250, 25)
     infection_rate = st.slider("Infection rate", 0.01, 0.60, 0.22, step=0.01)
     recovery_rate = st.slider("Recovery rate", 0.01, 0.30, 0.08, step=0.01)
+    mortality_rate = st.slider("Mortality rate", 0.001, 0.05, 0.008, step=0.001)
     days = st.slider("Days", 30, 240, 120)
 
     with st.expander("Policy controls", expanded=True):
@@ -274,15 +298,21 @@ inputs = {
     "initial_infected": initial_infected,
     "infection_rate": infection_rate,
     "recovery_rate": recovery_rate,
+    "mortality_rate": mortality_rate,
+    "lockdown_strength": lockdown_strength,
+    "mask_adoption": mask_adoption,
+    "vaccination_rate": vaccination_rate,
+    "travel_restriction": travel_restriction,
     "days": days,
 }
 
-severity, peak_infected = predict_from_classic_models(inputs)
+severity, peak_infected, total_deaths = predict_from_classic_models(inputs)
 curve = simulate_single_curve(
     population,
     initial_infected,
     infection_rate,
     recovery_rate,
+    mortality_rate,
     days,
     lockdown_strength,
     mask_adoption,
@@ -290,14 +320,18 @@ curve = simulate_single_curve(
     travel_restriction,
 )
 
-metric_columns = st.columns(4)
+metric_columns = st.columns(5)
 metric_columns[0].metric("Predicted severity", severity or "model missing")
 metric_columns[1].metric(
     "Predicted peak infected",
     f"{peak_infected:,.0f}" if peak_infected is not None else "model missing",
 )
-metric_columns[2].metric("Curve peak infected", f"{curve['infected'].max():,.0f}")
-metric_columns[3].metric("Peak day", int(curve.loc[curve["infected"].idxmax(), "day"]))
+metric_columns[2].metric(
+    "Predicted total deaths",
+    f"{total_deaths:,.0f}" if total_deaths is not None else "model missing",
+)
+metric_columns[3].metric("Curve peak infected", f"{curve['infected'].max():,.0f}")
+metric_columns[4].metric("Curve total deaths", f"{curve['deceased'].max():,.0f}")
 
 tab_overview, tab_data, tab_graph, tab_models = st.tabs(
     ["Overview", "Generated Data", "Graph Spread", "Models"]
@@ -307,7 +341,9 @@ with tab_overview:
     left, right = st.columns([2, 1])
     with left:
         st.subheader("Daily Infection Curve With Policies")
-        st.line_chart(curve.set_index("day")[["susceptible", "infected", "recovered", "vaccinated"]])
+        st.line_chart(
+            curve.set_index("day")[["susceptible", "infected", "recovered", "deceased", "vaccinated"]]
+        )
     with right:
         st.subheader("Selected Inputs")
         st.dataframe(pd.DataFrame([inputs]), hide_index=True, use_container_width=True)
@@ -338,7 +374,7 @@ with tab_data:
                 sorted(daily["scenario_id"].unique()),
             )
             daily_view = daily[daily["scenario_id"] == selected_scenario].set_index("day")
-            st.line_chart(daily_view[["susceptible", "infected", "recovered"]])
+            st.line_chart(daily_view[["susceptible", "infected", "recovered", "deceased", "vaccinated"]])
     else:
         st.info("Generate simulation data to preview CSV outputs.")
 
@@ -364,7 +400,17 @@ with tab_graph:
             st.plotly_chart(figure, use_container_width=True)
             st.dataframe(
                 snapshot[
-                    ["node", "population", "susceptible", "infected", "recovered", "infection_share"]
+                    [
+                        "node",
+                        "population",
+                        "susceptible",
+                        "infected",
+                        "recovered",
+                        "deceased",
+                        "vaccinated",
+                        "infection_share",
+                        "death_share",
+                    ]
                 ],
                 hide_index=True,
                 use_container_width=True,
@@ -386,6 +432,11 @@ with tab_models:
                 "available": REGRESSOR_PATH.exists(),
             },
             {
+                "model": "Total deaths regressor",
+                "path": str(DEATH_REGRESSOR_PATH),
+                "available": DEATH_REGRESSOR_PATH.exists(),
+            },
+            {
                 "model": "Daily LSTM",
                 "path": str(DAILY_LSTM_PATH),
                 "available": DAILY_LSTM_PATH.exists(),
@@ -395,10 +446,18 @@ with tab_models:
                 "path": str(GRAPH_LSTM_PATH),
                 "available": GRAPH_LSTM_PATH.exists(),
             },
+            {
+                "model": "Real-world COVID forecaster",
+                "path": str(REAL_WORLD_MODEL_PATH),
+                "available": REAL_WORLD_MODEL_PATH.exists(),
+            },
         ]
     )
     st.subheader("Model Files")
     st.dataframe(model_status, hide_index=True, use_container_width=True)
+    if REAL_WORLD_METRICS_PATH.exists():
+        st.subheader("Real-World OWID Test Metrics")
+        st.dataframe(load_csv(REAL_WORLD_METRICS_PATH), hide_index=True, use_container_width=True)
     st.caption(
         "The dashboard uses trained Random Forest models when available. "
         "Daily and graph LSTM files appear here after PyTorch training."

@@ -67,7 +67,17 @@ def build_sequences(
     sequence_length: int,
     node_count: int,
 ) -> tuple[np.ndarray, np.ndarray, float]:
-    feature_columns = ["susceptible", "infected", "recovered", "new_infections", "new_recoveries"]
+    feature_columns = [
+        "susceptible",
+        "infected",
+        "recovered",
+        "deceased",
+        "vaccinated",
+        "new_infections",
+        "new_recoveries",
+        "new_deaths",
+        "new_vaccinations",
+    ]
     scale = float(data["population"].max())
     sequences: list[np.ndarray] = []
     targets: list[np.ndarray] = []

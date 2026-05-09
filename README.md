@@ -1,6 +1,6 @@
 # Epidemic Spread Simulation and Machine Learning
 
-This project generates synthetic epidemic-spread scenarios with a C++ SIR-style
+This project generates synthetic epidemic-spread scenarios with a C++ SIRD-style
 simulation, then trains machine-learning models in Python to predict outbreak
 severity, peak infection count, daily infection counts, and graph/node-level
 infection dynamics.
@@ -67,9 +67,15 @@ The simulator writes these main inputs and labels:
 - `initial_infected`
 - `infection_rate`
 - `recovery_rate`
+- `mortality_rate`
+- `lockdown_strength`
+- `mask_adoption`
+- `vaccination_rate`
+- `travel_restriction`
 - `days`
 - `peak_infected`
 - `total_infected`
+- `total_deaths`
 - `severity`
 
 The daily file stores one row per scenario per day:
@@ -79,8 +85,12 @@ The daily file stores one row per scenario per day:
 - `susceptible`
 - `infected`
 - `recovered`
+- `deceased`
+- `vaccinated`
 - `new_infections`
 - `new_recoveries`
+- `new_deaths`
+- `new_vaccinations`
 
 The graph time-series file stores one row per scenario, node, and day. The
 current simulator uses 8 connected regions as graph nodes.
@@ -109,6 +119,16 @@ The training script saves:
 
 - `results\models\severity_classifier.joblib`
 - `results\models\peak_infected_regressor.joblib`
+- `results\models\total_deaths_regressor.joblib`
+
+Generate research-paper evaluation outputs:
+
+```powershell
+python training-model\main\evaluate_research_results.py
+```
+
+This saves confusion matrix figures, classification metrics, regression metrics,
+and actual-vs-predicted plots under `results\research\`.
 
 Train the aggregate daily infected-count LSTM:
 
@@ -123,6 +143,15 @@ python training-model\main\train_graph_lstm.py
 ```
 
 The neural scripts require PyTorch from `requirements.txt`.
+
+Test a model on the real-world Our World in Data COVID-19 dataset:
+
+```powershell
+python training-model\main\train_real_world.py
+```
+
+This trains on earlier country-level history and evaluates 7-day-ahead
+predictions on later dates for cases and deaths per million.
 
 ## Streamlit Dashboard
 
@@ -148,6 +177,21 @@ Policy controls include:
 
 - Classification: predict `severity` as `low`, `medium`, or `high`.
 - Regression: predict `peak_infected`.
+- Regression: predict `total_deaths`.
 - Daily LSTM: predict the next aggregate daily `infected` count.
 - Graph LSTM: predict the next day infected count for each graph node, then
   sum node predictions for total daily infections.
+- Real-world forecaster: predict 7-day-ahead COVID cases and deaths per million
+  using the Our World in Data dataset.
+
+## Epidemic Model
+
+The simulator now uses an SIRD-style compartment model:
+
+```text
+Susceptible -> Infected -> Recovered
+                     \-> Deceased
+```
+
+Vaccination moves people out of the susceptible group, while policy controls
+reduce the effective transmission rate.

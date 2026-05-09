@@ -19,6 +19,11 @@ struct SimulationConfig {
     int initialInfected;
     double infectionRate;
     double recoveryRate;
+    double mortalityRate;
+    double lockdownStrength;
+    double maskAdoption;
+    double vaccinationRate;
+    double travelRestriction;
     int days;
 };
 
@@ -28,9 +33,12 @@ struct SimulationResult {
     int finalSusceptible;
     int finalInfected;
     int finalRecovered;
+    int finalDeceased;
+    int finalVaccinated;
     int peakInfected;
     int peakDay;
     int totalInfected;
+    int totalDeaths;
     std::string severity;
 };
 
@@ -40,8 +48,12 @@ struct DailyRecord {
     int susceptible;
     int infected;
     int recovered;
+    int deceased;
+    int vaccinated;
     int newInfections;
     int newRecoveries;
+    int newDeaths;
+    int newVaccinations;
 };
 
 struct NodeDailyRecord {
@@ -52,8 +64,12 @@ struct NodeDailyRecord {
     int susceptible;
     int infected;
     int recovered;
+    int deceased;
+    int vaccinated;
     int newInfections;
     int newRecoveries;
+    int newDeaths;
+    int newVaccinations;
 };
 
 struct EdgeRecord {
@@ -70,11 +86,12 @@ struct ScenarioBundle {
     std::vector<EdgeRecord> edgeRecords;
 };
 
-std::string classifySeverity(double infectedShare) {
-    if (infectedShare < 0.20) {
+std::string classifySeverity(double infectedShare, double deathShare) {
+    const double riskScore = infectedShare + 2.5 * deathShare;
+    if (riskScore < 0.20) {
         return "low";
     }
-    if (infectedShare < 0.50) {
+    if (riskScore < 0.50) {
         return "medium";
     }
     return "high";
@@ -98,31 +115,56 @@ void createDirectoryIfMissing(const std::string& directory) {
 #endif
 }
 
+double effectiveInfectionRate(const SimulationConfig& config) {
+    const double policyEffect =
+        1.0
+        - 0.55 * config.lockdownStrength
+        - 0.35 * config.maskAdoption
+        - 0.20 * config.travelRestriction;
+    return config.infectionRate * std::max(0.0, policyEffect);
+}
+
 ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std::mt19937& rng) {
     int susceptible = config.population - config.initialInfected;
     int infected = config.initialInfected;
     int recovered = 0;
+    int deceased = 0;
+    int vaccinated = 0;
     int peakInfected = infected;
     int peakDay = 0;
     std::vector<DailyRecord> dailyRecords;
 
-    dailyRecords.push_back({scenarioId, 0, susceptible, infected, recovered, infected, 0});
+    dailyRecords.push_back({scenarioId, 0, susceptible, infected, recovered, deceased, vaccinated, infected, 0, 0, 0});
 
     for (int day = 1; day <= config.days; ++day) {
+        const int newVaccinations = std::min(
+            susceptible,
+            static_cast<int>(std::round(config.population * config.vaccinationRate))
+        );
+        susceptible -= newVaccinations;
+        vaccinated += newVaccinations;
+
         const double contactProbability =
-            config.infectionRate * static_cast<double>(infected) / config.population;
+            effectiveInfectionRate(config) * static_cast<double>(infected) / config.population;
         const double boundedContactProbability = clampProbability(contactProbability);
         const double boundedRecoveryProbability = clampProbability(config.recoveryRate);
+        const double boundedMortalityProbability = clampProbability(config.mortalityRate);
 
         std::binomial_distribution<int> newInfectionsDist(susceptible, boundedContactProbability);
-        std::binomial_distribution<int> newRecoveriesDist(infected, boundedRecoveryProbability);
-
         const int newInfections = std::min(newInfectionsDist(rng), susceptible);
-        const int newRecoveries = std::min(newRecoveriesDist(rng), infected);
+        int infectedAfterSpread = infected + newInfections;
+
+        std::binomial_distribution<int> newDeathsDist(infectedAfterSpread, boundedMortalityProbability);
+        const int newDeaths = std::min(newDeathsDist(rng), infectedAfterSpread);
+        infectedAfterSpread -= newDeaths;
+
+        std::binomial_distribution<int> newRecoveriesDist(infectedAfterSpread, boundedRecoveryProbability);
+        const int newRecoveries = std::min(newRecoveriesDist(rng), infectedAfterSpread);
 
         susceptible -= newInfections;
-        infected += newInfections - newRecoveries;
+        infected = infectedAfterSpread - newRecoveries;
         recovered += newRecoveries;
+        deceased += newDeaths;
 
         dailyRecords.push_back({
             scenarioId,
@@ -130,8 +172,12 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
             susceptible,
             infected,
             recovered,
+            deceased,
+            vaccinated,
             newInfections,
-            newRecoveries
+            newRecoveries,
+            newDeaths,
+            newVaccinations
         });
 
         if (infected > peakInfected) {
@@ -144,8 +190,9 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
         }
     }
 
-    const int totalInfected = recovered + infected;
+    const int totalInfected = recovered + infected + deceased;
     const double infectedShare = static_cast<double>(totalInfected) / config.population;
+    const double deathShare = static_cast<double>(deceased) / config.population;
 
     const SimulationResult summary {
         scenarioId,
@@ -153,10 +200,13 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
         susceptible,
         infected,
         recovered,
+        deceased,
+        vaccinated,
         peakInfected,
         peakDay,
         totalInfected,
-        classifySeverity(infectedShare)
+        deceased,
+        classifySeverity(infectedShare, deathShare)
     };
 
     const int nodeCount = 8;
@@ -166,6 +216,8 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
     std::vector<int> nodeSusceptible(nodeCount);
     std::vector<int> nodeInfected(nodeCount, 0);
     std::vector<int> nodeRecovered(nodeCount, 0);
+    std::vector<int> nodeDeceased(nodeCount, 0);
+    std::vector<int> nodeVaccinated(nodeCount, 0);
     std::vector<NodeDailyRecord> nodeDailyRecords;
     std::vector<EdgeRecord> edgeRecords;
 
@@ -191,7 +243,11 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
             nodeSusceptible[node],
             nodeInfected[node],
             nodeRecovered[node],
+            nodeDeceased[node],
+            nodeVaccinated[node],
             nodeInfected[node],
+            0,
+            0,
             0
         });
     }
@@ -199,8 +255,17 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
     for (int day = 1; day <= config.days; ++day) {
         std::vector<int> newInfections(nodeCount, 0);
         std::vector<int> newRecoveries(nodeCount, 0);
+        std::vector<int> newDeaths(nodeCount, 0);
+        std::vector<int> newVaccinations(nodeCount, 0);
 
         for (int node = 0; node < nodeCount; ++node) {
+            newVaccinations[node] = std::min(
+                nodeSusceptible[node],
+                static_cast<int>(std::round(nodePopulations[node] * config.vaccinationRate))
+            );
+            nodeSusceptible[node] -= newVaccinations[node];
+            nodeVaccinated[node] += newVaccinations[node];
+
             const int left = (node + nodeCount - 1) % nodeCount;
             const int right = (node + 1) % nodeCount;
             const double localPressure =
@@ -211,26 +276,36 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
                     static_cast<double>(nodeInfected[right]) / nodePopulations[right]
                 );
             const double contactProbability =
-                config.infectionRate * (0.75 * localPressure + 0.25 * neighborPressure);
+                effectiveInfectionRate(config) * (0.75 * localPressure + 0.25 * neighborPressure);
 
             std::binomial_distribution<int> infectionDist(
                 nodeSusceptible[node],
                 clampProbability(contactProbability)
             );
-            std::binomial_distribution<int> recoveryDist(
-                nodeInfected[node],
-                clampProbability(config.recoveryRate)
-            );
 
             newInfections[node] = std::min(infectionDist(rng), nodeSusceptible[node]);
-            newRecoveries[node] = std::min(recoveryDist(rng), nodeInfected[node]);
+            int infectedAfterSpread = nodeInfected[node] + newInfections[node];
+
+            std::binomial_distribution<int> deathDist(
+                infectedAfterSpread,
+                clampProbability(config.mortalityRate)
+            );
+            newDeaths[node] = std::min(deathDist(rng), infectedAfterSpread);
+            infectedAfterSpread -= newDeaths[node];
+
+            std::binomial_distribution<int> recoveryDist(
+                infectedAfterSpread,
+                clampProbability(config.recoveryRate)
+            );
+            newRecoveries[node] = std::min(recoveryDist(rng), infectedAfterSpread);
         }
 
         int activeInfections = 0;
         for (int node = 0; node < nodeCount; ++node) {
             nodeSusceptible[node] -= newInfections[node];
-            nodeInfected[node] += newInfections[node] - newRecoveries[node];
+            nodeInfected[node] += newInfections[node] - newRecoveries[node] - newDeaths[node];
             nodeRecovered[node] += newRecoveries[node];
+            nodeDeceased[node] += newDeaths[node];
             activeInfections += nodeInfected[node];
 
             nodeDailyRecords.push_back({
@@ -241,8 +316,12 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
                 nodeSusceptible[node],
                 nodeInfected[node],
                 nodeRecovered[node],
+                nodeDeceased[node],
+                nodeVaccinated[node],
                 newInfections[node],
-                newRecoveries[node]
+                newRecoveries[node],
+                newDeaths[node],
+                newVaccinations[node]
             });
         }
 
@@ -265,9 +344,10 @@ void writeDataset(const std::vector<SimulationResult>& results, const std::strin
         throw std::runtime_error("Unable to open output file: " + outputPath);
     }
 
-    file << "scenario_id,population,initial_infected,infection_rate,recovery_rate,days,"
-         << "final_susceptible,final_infected,final_recovered,peak_infected,"
-         << "peak_day,total_infected,severity\n";
+    file << "scenario_id,population,initial_infected,infection_rate,recovery_rate,mortality_rate,"
+         << "lockdown_strength,mask_adoption,vaccination_rate,travel_restriction,days,"
+         << "final_susceptible,final_infected,final_recovered,final_deceased,final_vaccinated,"
+         << "peak_infected,peak_day,total_infected,total_deaths,severity\n";
 
     file << std::fixed << std::setprecision(4);
     for (const auto& result : results) {
@@ -276,13 +356,21 @@ void writeDataset(const std::vector<SimulationResult>& results, const std::strin
              << result.config.initialInfected << ','
              << result.config.infectionRate << ','
              << result.config.recoveryRate << ','
+             << result.config.mortalityRate << ','
+             << result.config.lockdownStrength << ','
+             << result.config.maskAdoption << ','
+             << result.config.vaccinationRate << ','
+             << result.config.travelRestriction << ','
              << result.config.days << ','
              << result.finalSusceptible << ','
              << result.finalInfected << ','
              << result.finalRecovered << ','
+             << result.finalDeceased << ','
+             << result.finalVaccinated << ','
              << result.peakInfected << ','
              << result.peakDay << ','
              << result.totalInfected << ','
+             << result.totalDeaths << ','
              << result.severity << '\n';
     }
 }
@@ -298,15 +386,20 @@ void writeDailyCounts(const std::vector<DailyRecord>& records, const std::string
         throw std::runtime_error("Unable to open output file: " + outputPath);
     }
 
-    file << "scenario_id,day,susceptible,infected,recovered,new_infections,new_recoveries\n";
+    file << "scenario_id,day,susceptible,infected,recovered,deceased,vaccinated,"
+         << "new_infections,new_recoveries,new_deaths,new_vaccinations\n";
     for (const auto& record : records) {
         file << record.scenarioId << ','
              << record.day << ','
              << record.susceptible << ','
              << record.infected << ','
              << record.recovered << ','
+             << record.deceased << ','
+             << record.vaccinated << ','
              << record.newInfections << ','
-             << record.newRecoveries << '\n';
+             << record.newRecoveries << ','
+             << record.newDeaths << ','
+             << record.newVaccinations << '\n';
     }
 }
 
@@ -321,8 +414,8 @@ void writeNodeTimeSeries(const std::vector<NodeDailyRecord>& records, const std:
         throw std::runtime_error("Unable to open output file: " + outputPath);
     }
 
-    file << "scenario_id,node_id,day,population,susceptible,infected,recovered,"
-         << "new_infections,new_recoveries\n";
+    file << "scenario_id,node_id,day,population,susceptible,infected,recovered,deceased,vaccinated,"
+         << "new_infections,new_recoveries,new_deaths,new_vaccinations\n";
     for (const auto& record : records) {
         file << record.scenarioId << ','
              << record.nodeId << ','
@@ -331,8 +424,12 @@ void writeNodeTimeSeries(const std::vector<NodeDailyRecord>& records, const std:
              << record.susceptible << ','
              << record.infected << ','
              << record.recovered << ','
+             << record.deceased << ','
+             << record.vaccinated << ','
              << record.newInfections << ','
-             << record.newRecoveries << '\n';
+             << record.newRecoveries << ','
+             << record.newDeaths << ','
+             << record.newVaccinations << '\n';
     }
 }
 
@@ -375,6 +472,11 @@ int main(int argc, char* argv[]) {
     std::uniform_int_distribution<int> daysDist(60, 180);
     std::uniform_real_distribution<double> infectionRateDist(0.05, 0.45);
     std::uniform_real_distribution<double> recoveryRateDist(0.02, 0.20);
+    std::uniform_real_distribution<double> mortalityRateDist(0.001, 0.025);
+    std::uniform_real_distribution<double> lockdownStrengthDist(0.0, 0.8);
+    std::uniform_real_distribution<double> maskAdoptionDist(0.0, 0.9);
+    std::uniform_real_distribution<double> vaccinationRateDist(0.0, 0.01);
+    std::uniform_real_distribution<double> travelRestrictionDist(0.0, 0.8);
 
     std::vector<SimulationResult> results;
     std::vector<DailyRecord> dailyRecords;
@@ -392,6 +494,11 @@ int main(int argc, char* argv[]) {
             initialInfectedDist(rng),
             infectionRateDist(rng),
             recoveryRateDist(rng),
+            mortalityRateDist(rng),
+            lockdownStrengthDist(rng),
+            maskAdoptionDist(rng),
+            vaccinationRateDist(rng),
+            travelRestrictionDist(rng),
             daysDist(rng)
         };
 
