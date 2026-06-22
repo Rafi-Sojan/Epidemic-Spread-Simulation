@@ -24,6 +24,12 @@ struct SimulationConfig {
     double maskAdoption;
     double vaccinationRate;
     double travelRestriction;
+    double medianAge;
+    double elderlyPopulationRatio;
+    double childPopulationRatio;
+    double temperatureCelsius;
+    double humidityPercent;
+    double rainfallMm;
     int days;
 };
 
@@ -121,7 +127,24 @@ double effectiveInfectionRate(const SimulationConfig& config) {
         - 0.55 * config.lockdownStrength
         - 0.35 * config.maskAdoption
         - 0.20 * config.travelRestriction;
-    return config.infectionRate * std::max(0.0, policyEffect);
+    const double temperatureFactor = 1.0 + std::max(0.0, 22.0 - config.temperatureCelsius) * 0.012;
+    const double humidityFactor = 1.0 + std::max(0.0, 45.0 - config.humidityPercent) * 0.006;
+    const double rainfallFactor = 1.0 - std::min(0.18, config.rainfallMm * 0.004);
+    const double childContactFactor = 1.0 + config.childPopulationRatio * 0.25;
+    return config.infectionRate
+        * std::max(0.0, policyEffect)
+        * temperatureFactor
+        * humidityFactor
+        * rainfallFactor
+        * childContactFactor;
+}
+
+double effectiveMortalityRate(const SimulationConfig& config) {
+    const double ageFactor =
+        1.0
+        + std::max(0.0, config.medianAge - 35.0) * 0.018
+        + config.elderlyPopulationRatio * 1.8;
+    return config.mortalityRate * ageFactor;
 }
 
 ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std::mt19937& rng) {
@@ -148,7 +171,7 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
             effectiveInfectionRate(config) * static_cast<double>(infected) / config.population;
         const double boundedContactProbability = clampProbability(contactProbability);
         const double boundedRecoveryProbability = clampProbability(config.recoveryRate);
-        const double boundedMortalityProbability = clampProbability(config.mortalityRate);
+        const double boundedMortalityProbability = clampProbability(effectiveMortalityRate(config));
 
         std::binomial_distribution<int> newInfectionsDist(susceptible, boundedContactProbability);
         const int newInfections = std::min(newInfectionsDist(rng), susceptible);
@@ -288,7 +311,7 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
 
             std::binomial_distribution<int> deathDist(
                 infectedAfterSpread,
-                clampProbability(config.mortalityRate)
+                clampProbability(effectiveMortalityRate(config))
             );
             newDeaths[node] = std::min(deathDist(rng), infectedAfterSpread);
             infectedAfterSpread -= newDeaths[node];
@@ -345,7 +368,9 @@ void writeDataset(const std::vector<SimulationResult>& results, const std::strin
     }
 
     file << "scenario_id,population,initial_infected,infection_rate,recovery_rate,mortality_rate,"
-         << "lockdown_strength,mask_adoption,vaccination_rate,travel_restriction,days,"
+         << "lockdown_strength,mask_adoption,vaccination_rate,travel_restriction,"
+         << "median_age,elderly_population_ratio,child_population_ratio,"
+         << "temperature_celsius,humidity_percent,rainfall_mm,days,"
          << "final_susceptible,final_infected,final_recovered,final_deceased,final_vaccinated,"
          << "peak_infected,peak_day,total_infected,total_deaths,severity\n";
 
@@ -361,6 +386,12 @@ void writeDataset(const std::vector<SimulationResult>& results, const std::strin
              << result.config.maskAdoption << ','
              << result.config.vaccinationRate << ','
              << result.config.travelRestriction << ','
+             << result.config.medianAge << ','
+             << result.config.elderlyPopulationRatio << ','
+             << result.config.childPopulationRatio << ','
+             << result.config.temperatureCelsius << ','
+             << result.config.humidityPercent << ','
+             << result.config.rainfallMm << ','
              << result.config.days << ','
              << result.finalSusceptible << ','
              << result.finalInfected << ','
@@ -477,6 +508,12 @@ int main(int argc, char* argv[]) {
     std::uniform_real_distribution<double> maskAdoptionDist(0.0, 0.9);
     std::uniform_real_distribution<double> vaccinationRateDist(0.0, 0.01);
     std::uniform_real_distribution<double> travelRestrictionDist(0.0, 0.8);
+    std::uniform_real_distribution<double> medianAgeDist(18.0, 55.0);
+    std::uniform_real_distribution<double> elderlyPopulationRatioDist(0.03, 0.24);
+    std::uniform_real_distribution<double> childPopulationRatioDist(0.12, 0.34);
+    std::uniform_real_distribution<double> temperatureDist(5.0, 40.0);
+    std::uniform_real_distribution<double> humidityDist(25.0, 95.0);
+    std::uniform_real_distribution<double> rainfallDist(0.0, 45.0);
 
     std::vector<SimulationResult> results;
     std::vector<DailyRecord> dailyRecords;
@@ -499,6 +536,12 @@ int main(int argc, char* argv[]) {
             maskAdoptionDist(rng),
             vaccinationRateDist(rng),
             travelRestrictionDist(rng),
+            medianAgeDist(rng),
+            elderlyPopulationRatioDist(rng),
+            childPopulationRatioDist(rng),
+            temperatureDist(rng),
+            humidityDist(rng),
+            rainfallDist(rng),
             daysDist(rng)
         };
 

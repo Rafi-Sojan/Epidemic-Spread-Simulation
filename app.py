@@ -36,6 +36,12 @@ FEATURE_COLUMNS = [
     "mask_adoption",
     "vaccination_rate",
     "travel_restriction",
+    "median_age",
+    "elderly_population_ratio",
+    "child_population_ratio",
+    "temperature_celsius",
+    "humidity_percent",
+    "rainfall_mm",
     "days",
 ]
 
@@ -110,6 +116,12 @@ def simulate_single_curve(
     infection_rate: float,
     recovery_rate: float,
     mortality_rate: float,
+    median_age: float,
+    elderly_population_ratio: float,
+    child_population_ratio: float,
+    temperature_celsius: float,
+    humidity_percent: float,
+    rainfall_mm: float,
     days: int,
     lockdown_strength: float,
     mask_adoption: float,
@@ -130,7 +142,25 @@ def simulate_single_curve(
             - 0.35 * mask_adoption
             - 0.20 * travel_restriction
         )
-        effective_infection_rate = max(0.0, infection_rate * policy_effect)
+        temperature_factor = 1.0 + max(0.0, 22.0 - temperature_celsius) * 0.012
+        humidity_factor = 1.0 + max(0.0, 45.0 - humidity_percent) * 0.006
+        rainfall_factor = 1.0 - min(0.18, rainfall_mm * 0.004)
+        child_contact_factor = 1.0 + child_population_ratio * 0.25
+        age_mortality_factor = (
+            1.0
+            + max(0.0, median_age - 35.0) * 0.018
+            + elderly_population_ratio * 1.8
+        )
+        effective_infection_rate = max(
+            0.0,
+            infection_rate
+            * policy_effect
+            * temperature_factor
+            * humidity_factor
+            * rainfall_factor
+            * child_contact_factor,
+        )
+        effective_mortality_rate = mortality_rate * age_mortality_factor
 
         rows.append(
             {
@@ -141,6 +171,7 @@ def simulate_single_curve(
                 "deceased": round(deceased),
                 "vaccinated": round(vaccinated),
                 "effective_infection_rate": effective_infection_rate,
+                "effective_mortality_rate": effective_mortality_rate,
             }
         )
 
@@ -153,7 +184,7 @@ def simulate_single_curve(
 
         susceptible -= new_infections
         infected_after_spread = infected + new_infections
-        new_deaths = min(mortality_rate * infected_after_spread, infected_after_spread)
+        new_deaths = min(effective_mortality_rate * infected_after_spread, infected_after_spread)
         infected_after_deaths = infected_after_spread - new_deaths
         new_recoveries = min(recovery_rate * infected_after_deaths, infected_after_deaths)
 
@@ -277,6 +308,14 @@ with st.sidebar:
     mortality_rate = st.slider("Mortality rate", 0.001, 0.05, 0.008, step=0.001)
     days = st.slider("Days", 30, 240, 120)
 
+    with st.expander("Demographics and climate", expanded=False):
+        median_age = st.slider("Median age", 18.0, 55.0, 32.0, step=0.5)
+        elderly_population_ratio = st.slider("Elderly population ratio", 0.03, 0.24, 0.09, step=0.01)
+        child_population_ratio = st.slider("Child population ratio", 0.12, 0.34, 0.22, step=0.01)
+        temperature_celsius = st.slider("Temperature (C)", 5.0, 40.0, 28.0, step=0.5)
+        humidity_percent = st.slider("Humidity (%)", 25.0, 95.0, 65.0, step=1.0)
+        rainfall_mm = st.slider("Rainfall (mm/day)", 0.0, 45.0, 4.0, step=0.5)
+
     with st.expander("Policy controls", expanded=True):
         lockdown_strength = st.slider("Lockdown strength", 0.0, 1.0, 0.20, step=0.05)
         mask_adoption = st.slider("Mask adoption", 0.0, 1.0, 0.35, step=0.05)
@@ -303,6 +342,12 @@ inputs = {
     "mask_adoption": mask_adoption,
     "vaccination_rate": vaccination_rate,
     "travel_restriction": travel_restriction,
+    "median_age": median_age,
+    "elderly_population_ratio": elderly_population_ratio,
+    "child_population_ratio": child_population_ratio,
+    "temperature_celsius": temperature_celsius,
+    "humidity_percent": humidity_percent,
+    "rainfall_mm": rainfall_mm,
     "days": days,
 }
 
@@ -313,6 +358,12 @@ curve = simulate_single_curve(
     infection_rate,
     recovery_rate,
     mortality_rate,
+    median_age,
+    elderly_population_ratio,
+    child_population_ratio,
+    temperature_celsius,
+    humidity_percent,
+    rainfall_mm,
     days,
     lockdown_strength,
     mask_adoption,
@@ -356,6 +407,7 @@ with tab_overview:
                     "daily_vaccination_rate": vaccination_rate,
                     "travel_restriction": travel_restriction,
                     "average_effective_infection_rate": curve["effective_infection_rate"].mean(),
+                    "average_effective_mortality_rate": curve["effective_mortality_rate"].mean(),
                 }
             ]
         )
@@ -446,18 +498,10 @@ with tab_models:
                 "path": str(GRAPH_LSTM_PATH),
                 "available": GRAPH_LSTM_PATH.exists(),
             },
-            {
-                "model": "Real-world COVID forecaster",
-                "path": str(REAL_WORLD_MODEL_PATH),
-                "available": REAL_WORLD_MODEL_PATH.exists(),
-            },
         ]
     )
     st.subheader("Model Files")
     st.dataframe(model_status, hide_index=True, use_container_width=True)
-    if REAL_WORLD_METRICS_PATH.exists():
-        st.subheader("Real-World OWID Test Metrics")
-        st.dataframe(load_csv(REAL_WORLD_METRICS_PATH), hide_index=True, use_container_width=True)
     st.caption(
         "The dashboard uses trained Random Forest models when available. "
         "Daily and graph LSTM files appear here after PyTorch training."

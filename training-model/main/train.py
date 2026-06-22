@@ -24,6 +24,12 @@ FEATURE_COLUMNS = [
     "mask_adoption",
     "vaccination_rate",
     "travel_restriction",
+    "median_age",
+    "elderly_population_ratio",
+    "child_population_ratio",
+    "temperature_celsius",
+    "humidity_percent",
+    "rainfall_mm",
     "days",
 ]
 
