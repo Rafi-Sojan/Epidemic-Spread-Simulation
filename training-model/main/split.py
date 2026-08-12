@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -17,11 +18,21 @@ def main() -> None:
         )
 
     data = pd.read_csv(DATASET_PATH)
+    if data.empty:
+        raise ValueError("The generated epidemic dataset is empty.")
+
+    class_counts = data["severity"].value_counts()
+    test_rows = math.ceil(len(data) * 0.2)
+    stratify = (
+        data["severity"]
+        if class_counts.min() >= 2 and test_rows >= len(class_counts)
+        else None
+    )
     train_data, test_data = train_test_split(
         data,
         test_size=0.2,
         random_state=42,
-        stratify=data["severity"],
+        stratify=stratify,
     )
 
     TRAIN_PATH.parent.mkdir(parents=True, exist_ok=True)

@@ -34,7 +34,11 @@ class DailyInfectionLSTM(nn.Module):
         return self.output(hidden[-1]).squeeze(-1)
 
 
-def build_sequences(data: pd.DataFrame, sequence_length: int) -> tuple[np.ndarray, np.ndarray, float]:
+def build_sequences(
+    data: pd.DataFrame,
+    sequence_length: int,
+    scale: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, float]:
     feature_columns = [
         "susceptible",
         "infected",
@@ -46,7 +50,12 @@ def build_sequences(data: pd.DataFrame, sequence_length: int) -> tuple[np.ndarra
         "new_deaths",
         "new_vaccinations",
     ]
-    scale = float(data[["susceptible", "infected", "recovered", "deceased", "vaccinated"]].sum(axis=1).max())
+    if scale is None:
+        scale = float(
+            data[["susceptible", "infected", "recovered", "deceased", "vaccinated"]]
+            .sum(axis=1)
+            .max()
+        )
     sequences: list[np.ndarray] = []
     targets: list[float] = []
 
@@ -84,7 +93,7 @@ def train(args: argparse.Namespace) -> None:
     data = pd.read_csv(DAILY_PATH)
     train_data, test_data = split_by_scenario(data)
     x_train, y_train, scale = build_sequences(train_data, args.sequence_length)
-    x_test, y_test, _ = build_sequences(test_data, args.sequence_length)
+    x_test, y_test, _ = build_sequences(test_data, args.sequence_length, scale)
 
     if len(x_train) == 0 or len(x_test) == 0:
         raise ValueError("Not enough daily rows to build LSTM sequences.")

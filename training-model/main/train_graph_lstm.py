@@ -66,6 +66,7 @@ def build_sequences(
     data: pd.DataFrame,
     sequence_length: int,
     node_count: int,
+    scale: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     feature_columns = [
         "susceptible",
@@ -78,7 +79,8 @@ def build_sequences(
         "new_deaths",
         "new_vaccinations",
     ]
-    scale = float(data["population"].max())
+    if scale is None:
+        scale = float(data["population"].max())
     sequences: list[np.ndarray] = []
     targets: list[np.ndarray] = []
 
@@ -127,7 +129,7 @@ def train(args: argparse.Namespace) -> None:
 
     train_data, test_data = split_by_scenario(data)
     x_train, y_train, scale = build_sequences(train_data, args.sequence_length, node_count)
-    x_test, y_test, _ = build_sequences(test_data, args.sequence_length, node_count)
+    x_test, y_test, _ = build_sequences(test_data, args.sequence_length, node_count, scale)
 
     if len(x_train) == 0 or len(x_test) == 0:
         raise ValueError("Not enough graph rows to build Graph LSTM sequences.")

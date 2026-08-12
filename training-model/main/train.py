@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import joblib
@@ -134,13 +135,38 @@ def main() -> None:
     classifier_path = MODEL_DIR / "severity_classifier.joblib"
     regressor_path = MODEL_DIR / "peak_infected_regressor.joblib"
     death_regressor_path = MODEL_DIR / "total_deaths_regressor.joblib"
+    metadata_path = MODEL_DIR / "model_metadata.json"
     joblib.dump(classifier, classifier_path)
     joblib.dump(regressor, regressor_path)
     joblib.dump(death_regressor, death_regressor_path)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "model_family": "RandomForest",
+                "feature_columns": FEATURE_COLUMNS,
+                "classification": {
+                    "target": "severity",
+                    "classes": ["low", "medium", "high"],
+                    "n_estimators": 250,
+                    "max_depth": 12,
+                    "class_weight": "balanced",
+                },
+                "regression": {
+                    "targets": ["peak_infected", "total_deaths"],
+                    "n_estimators": 250,
+                    "max_depth": 14,
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     print(f"\nSaved classifier to {classifier_path}")
     print(f"Saved regressor to {regressor_path}")
     print(f"Saved death regressor to {death_regressor_path}")
+    print(f"Saved model metadata to {metadata_path}")
 
 
 if __name__ == "__main__":

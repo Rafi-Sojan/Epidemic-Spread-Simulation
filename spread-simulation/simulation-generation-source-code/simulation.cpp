@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -114,11 +116,35 @@ double clampProbability(double value) {
 }
 
 void createDirectoryIfMissing(const std::string& directory) {
+    if (directory.empty()) {
+        return;
+    }
+
+    std::string current;
+    for (std::size_t index = 0; index <= directory.size(); ++index) {
+        const bool atEnd = index == directory.size();
+        const char character = atEnd ? '/' : directory[index];
+        if (character != '/' && character != '\\') {
+            current += character;
+            continue;
+        }
+
+        if (!current.empty() && !(current.size() == 2 && current[1] == ':')) {
 #ifdef _WIN32
-    _mkdir(directory.c_str());
+            if (_mkdir(current.c_str()) != 0 && errno != EEXIST) {
+                throw std::runtime_error("Unable to create directory: " + current);
+            }
 #else
-    mkdir(directory.c_str(), 0755);
+            if (mkdir(current.c_str(), 0755) != 0 && errno != EEXIST) {
+                throw std::runtime_error("Unable to create directory: " + current);
+            }
 #endif
+        }
+
+        if (!atEnd) {
+            current += character;
+        }
+    }
 }
 
 double effectiveInfectionRate(const SimulationConfig& config) {
@@ -157,7 +183,7 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
     int peakDay = 0;
     std::vector<DailyRecord> dailyRecords;
 
-    dailyRecords.push_back({scenarioId, 0, susceptible, infected, recovered, deceased, vaccinated, infected, 0, 0, 0});
+    dailyRecords.push_back({scenarioId, 0, susceptible, infected, recovered, deceased, vaccinated, 0, 0, 0, 0});
 
     for (int day = 1; day <= config.days; ++day) {
         const int newVaccinations = std::min(
@@ -268,7 +294,7 @@ ScenarioBundle runSimulation(int scenarioId, const SimulationConfig& config, std
             nodeRecovered[node],
             nodeDeceased[node],
             nodeVaccinated[node],
-            nodeInfected[node],
+            0,
             0,
             0,
             0
@@ -485,8 +511,57 @@ void writeEdges(const std::vector<EdgeRecord>& records, const std::string& outpu
     }
 }
 
-int main(int argc, char* argv[]) {
-    const int scenarioCount = argc > 1 ? std::stoi(argv[1]) : 1000;
+int parseScenarioCount(int argc, char* argv[]) {
+    if (argc <= 1) {
+        return 1000;
+    }
+
+    try {
+        std::size_t consumed = 0;
+        const std::string argument(argv[1]);
+        const int value = std::stoi(argument, &consumed);
+        if (consumed != argument.size() || value <= 0) {
+            throw std::invalid_argument("scenario count must be positive");
+        }
+        return value;
+    } catch (const std::exception&) {
+        throw std::runtime_error("Scenario count must be a positive integer.");
+    }
+}
+
+unsigned int parseSeed(int argc, char* argv[]) {
+    if (argc <= 6) {
+        return std::random_device{}();
+    }
+
+    try {
+        std::size_t consumed = 0;
+        const std::string argument(argv[6]);
+        const unsigned long value = std::stoul(argument, &consumed);
+        if (consumed != argument.size() || value > std::numeric_limits<unsigned int>::max()) {
+            throw std::invalid_argument("seed must be an unsigned integer");
+        }
+        return static_cast<unsigned int>(value);
+    } catch (const std::exception& error) {
+        throw std::runtime_error("Seed must be an unsigned integer.");
+    }
+}
+
+void printUsage(const char* executable) {
+    std::cout
+        << "Usage: " << executable << " [scenario_count] [summary_csv] [daily_csv] "
+        << "[graph_csv] [edges_csv] [seed]\n"
+        << "Defaults: 1000 scenarios, results/*.csv, random seed.\n";
+}
+
+int runApplication(int argc, char* argv[]) {
+    if (argc > 1 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
+        printUsage(argv[0]);
+        return 0;
+    }
+
+    const int scenarioCount = parseScenarioCount(argc, argv);
+    const unsigned int seed = parseSeed(argc, argv);
     const std::string outputPath =
         argc > 2 ? argv[2] : "results/epidemic_dataset.csv";
     const std::string dailyOutputPath =
@@ -496,8 +571,7 @@ int main(int argc, char* argv[]) {
     const std::string edgeOutputPath =
         argc > 5 ? argv[5] : "results/graph_edges.csv";
 
-    std::random_device device;
-    std::mt19937 rng(device());
+    std::mt19937 rng(seed);
 
     std::uniform_int_distribution<int> populationDist(500, 10000);
     std::uniform_int_distribution<int> daysDist(60, 180);
@@ -561,9 +635,19 @@ int main(int argc, char* argv[]) {
     writeNodeTimeSeries(nodeDailyRecords, graphOutputPath);
     writeEdges(edgeRecords, edgeOutputPath);
 
+    std::cout << "Seed: " << seed << '\n';
     std::cout << "Generated " << results.size() << " simulations at " << outputPath << '\n';
     std::cout << "Generated daily counts at " << dailyOutputPath << '\n';
     std::cout << "Generated graph time series at " << graphOutputPath << '\n';
     std::cout << "Generated graph edges at " << edgeOutputPath << '\n';
     return 0;
+}
+
+int main(int argc, char* argv[]) {
+    try {
+        return runApplication(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "Error: " << error.what() << '\n';
+        return 1;
+    }
 }

@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from sklearn.metrics import (
-    ConfusionMatrixDisplay,
     accuracy_score,
     classification_report,
     confusion_matrix,
@@ -69,14 +68,6 @@ def save_confusion_matrix(test_data: pd.DataFrame, predictions: pd.Series) -> No
     plt.tight_layout()
     plt.savefig(RESEARCH_DIR / "severity_confusion_matrix.png", dpi=300)
     plt.close()
-
-    display = ConfusionMatrixDisplay(confusion_matrix=matrix, display_labels=CLASS_LABELS)
-    display.plot(cmap="Blues", values_format="d")
-    plt.title("Severity Classification Confusion Matrix")
-    plt.tight_layout()
-    plt.savefig(RESEARCH_DIR / "severity_confusion_matrix_sklearn.png", dpi=300)
-    plt.close()
-
 
 def save_classification_results(test_data: pd.DataFrame, predictions: pd.Series) -> None:
     report_dict = classification_report(

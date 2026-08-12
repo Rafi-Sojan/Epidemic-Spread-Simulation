@@ -1,7 +1,8 @@
 pandas
 scikit-learn
 joblib
-torch
 streamlit
 networkx
 plotly
+matplotlib
+seaborn

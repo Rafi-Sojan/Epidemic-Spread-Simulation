@@ -23,8 +23,7 @@ REGRESSOR_PATH = MODEL_DIR / "peak_infected_regressor.joblib"
 DEATH_REGRESSOR_PATH = MODEL_DIR / "total_deaths_regressor.joblib"
 DAILY_LSTM_PATH = MODEL_DIR / "daily_infection_lstm.pt"
 GRAPH_LSTM_PATH = MODEL_DIR / "graph_lstm.pt"
-REAL_WORLD_MODEL_PATH = MODEL_DIR / "real_world_covid_forecaster.joblib"
-REAL_WORLD_METRICS_PATH = ROOT / "results" / "real_world" / "real_world_metrics.csv"
+MODEL_METADATA_PATH = MODEL_DIR / "model_metadata.json"
 
 FEATURE_COLUMNS = [
     "population",
@@ -391,7 +390,7 @@ tab_overview, tab_data, tab_graph, tab_models = st.tabs(
 with tab_overview:
     left, right = st.columns([2, 1])
     with left:
-        st.subheader("Daily Infection Curve With Policies")
+        st.subheader("Expected Daily Infection Curve With Policies")
         st.line_chart(
             curve.set_index("day")[["susceptible", "infected", "recovered", "deceased", "vaccinated"]]
         )
@@ -498,11 +497,16 @@ with tab_models:
                 "path": str(GRAPH_LSTM_PATH),
                 "available": GRAPH_LSTM_PATH.exists(),
             },
+            {
+                "model": "Model metadata",
+                "path": str(MODEL_METADATA_PATH),
+                "available": MODEL_METADATA_PATH.exists(),
+            },
         ]
     )
     st.subheader("Model Files")
     st.dataframe(model_status, hide_index=True, use_container_width=True)
     st.caption(
-        "The dashboard uses trained Random Forest models when available. "
-        "Daily and graph LSTM files appear here after PyTorch training."
+        "The dashboard uses trained Random Forest models for the reported results. "
+        "Daily and graph LSTM files are optional experimental extensions."
     )

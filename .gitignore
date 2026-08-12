@@ -12,3 +12,11 @@ results/research/
 # Python cache
 __pycache__/
 *.py[cod]
+
+# Local environments and audit/build scratch space
+env/
+tmp/
+
+# Local submission artifacts
+docs/
+*.pptx

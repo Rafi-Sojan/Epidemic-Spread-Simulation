@@ -1,35 +1,146 @@
 # Epidemic Spread Simulation and Machine Learning
 
-This project generates synthetic epidemic-spread scenarios with a C++ SIRD-style
-simulation, then trains machine-learning models in Python to predict outbreak
-severity, peak infection count, daily infection counts, and graph/node-level
-infection dynamics.
+An end-to-end, simulation-driven epidemic analysis system. The project uses a
+probabilistic C++ SIRD model to generate controlled epidemic scenarios and
+Python-based Random Forest models to predict outbreak severity, peak infected
+count, and total deaths.
 
-## Project Structure
+The system is intended for education, experimentation, and research prototyping.
+Its reported metrics are measured on synthetic simulation data and must not be
+interpreted as validated real-world forecasting accuracy.
+
+## Overview
+
+The project combines four components:
+
+1. A stochastic SIRD epidemic simulator written in C++.
+2. A CSV data pipeline for scenario, daily, and regional graph outputs.
+3. Random Forest classification and regression models written in Python.
+4. A Streamlit dashboard for interactive scenario exploration.
+
+The main workflow is:
 
 ```text
-spread-simulation/
-  simulation-generation-source-code/
-    simulation.cpp
-training-model/
-  main/
-    split.py
-    train.py
-    train_daily_lstm.py
-    train_graph_lstm.py
-results/
-  epidemic_dataset.csv
-  daily_counts.csv
-  graph_timeseries.csv
-  graph_edges.csv
-  train.csv
-  test.csv
-  models/
+Scenario parameters
+        |
+        v
+Probabilistic SIRD simulation
+        |
+        v
+CSV dataset generation
+        |
+        v
+Train/test split and model training
+        |
+        v
+Evaluation and Streamlit visualization
 ```
 
-## Build and Generate Data
+## Features
 
-Compile the C++ simulator:
+- SIRD compartments: susceptible, infected, recovered, and deceased.
+- Vaccination as an additional population transition.
+- Policy controls for lockdown, masks, vaccination, and travel restriction.
+- Demographic factors including median age, elderly ratio, and child ratio.
+- Climate factors including temperature, humidity, and rainfall.
+- Probabilistic infections, recoveries, deaths, and regional spread.
+- Severity classification into low, medium, and high risk.
+- Peak infected count and total deaths regression.
+- Eight-node regional graph simulation.
+- Interactive Streamlit visualization.
+- Reproducible runs through an explicit random seed.
+- Automated CSV contract validation.
+
+## Repository Structure
+
+```text
+Epidemic-Spread-Simulation/
+├── app.py
+├── README.md
+├── requirements.txt
+├── requirements-optional.txt
+├── .gitignore
+│
+├── spread-simulation/
+│   ├── simulation.exe                  # Generated build artifact
+│   └── simulation-generation-source-code/
+│       └── simulation.cpp              # Probabilistic SIRD simulator
+│
+├── training-model/
+│   └── main/
+│       ├── split.py                    # Dataset splitting
+│       ├── train.py                    # Random Forest training
+│       ├── evaluate_research_results.py
+│       ├── train_daily_lstm.py         # Optional extension
+│       └── train_graph_lstm.py         # Optional extension
+│
+├── tools/
+│   ├── run_pipeline.ps1               # Complete Windows workflow
+│   └── validate_outputs.py             # Output contract checks
+│
+└── results/                            # Generated and Git-ignored
+    ├── epidemic_dataset.csv
+    ├── daily_counts.csv
+    ├── graph_timeseries.csv
+    ├── graph_edges.csv
+    ├── train.csv
+    ├── test.csv
+    ├── models/
+    └── research/
+```
+
+Report documents, figures, presentations, virtual environments, and generated
+results are excluded from the public GitHub source workflow.
+
+## Requirements
+
+### Core requirements
+
+- C++ compiler with C++11 support, such as MinGW g++.
+- Python 3.10 or newer.
+- Python packages listed in `requirements.txt`.
+
+Install the core Python dependencies with:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+### Optional neural-network requirements
+
+The daily LSTM and Graph LSTM scripts require PyTorch. Install it separately
+only when those extensions are needed:
+
+```powershell
+python -m pip install -r requirements-optional.txt
+```
+
+The final reported project results use Random Forest models and do not require
+PyTorch.
+
+## Quick Start
+
+The recommended workflow compiles the simulator, generates seeded data,
+validates the outputs, trains the models, and produces evaluation results:
+
+```powershell
+.\tools\run_pipeline.ps1 -ScenarioCount 1000 -Seed 42
+```
+
+The pipeline creates:
+
+- `results\epidemic_dataset.csv`
+- `results\daily_counts.csv`
+- `results\graph_timeseries.csv`
+- `results\graph_edges.csv`
+- `results\train.csv`
+- `results\test.csv`
+- trained model files under `results\models\`
+- evaluation outputs under `results\research\`
+
+## Manual Workflow
+
+### 1. Compile the simulator
 
 ```powershell
 g++ -std=c++11 -O2 -Wall -Wextra -pedantic `
@@ -37,161 +148,188 @@ g++ -std=c++11 -O2 -Wall -Wextra -pedantic `
   -o "spread-simulation\simulation.exe"
 ```
 
-Generate 1,000 simulation rows:
-
-```powershell
-.\spread-simulation\simulation.exe 1000 results\epidemic_dataset.csv
-```
-
-The simulator also writes daily and graph outputs by default:
-
-```text
-results\daily_counts.csv
-results\graph_timeseries.csv
-results\graph_edges.csv
-```
-
-You can pass all output paths explicitly:
+### 2. Generate data
 
 ```powershell
 .\spread-simulation\simulation.exe 1000 `
   results\epidemic_dataset.csv `
   results\daily_counts.csv `
   results\graph_timeseries.csv `
-  results\graph_edges.csv
+  results\graph_edges.csv `
+  42
 ```
 
-The simulator writes these main inputs and labels:
+The final argument is the random seed. Supplying the same seed and parameters
+produces identical simulator outputs. Use `--help` to display the command-line
+syntax.
 
-- `population`
-- `initial_infected`
-- `infection_rate`
-- `recovery_rate`
-- `mortality_rate`
-- `lockdown_strength`
-- `mask_adoption`
-- `vaccination_rate`
-- `travel_restriction`
-- `days`
-- `peak_infected`
-- `total_infected`
-- `total_deaths`
-- `severity`
-
-The daily file stores one row per scenario per day:
-
-- `scenario_id`
-- `day`
-- `susceptible`
-- `infected`
-- `recovered`
-- `deceased`
-- `vaccinated`
-- `new_infections`
-- `new_recoveries`
-- `new_deaths`
-- `new_vaccinations`
-
-The graph time-series file stores one row per scenario, node, and day. The
-current simulator uses 8 connected regions as graph nodes.
-
-## Train Models
-
-Install Python dependencies:
+### 3. Validate the generated data
 
 ```powershell
-pip install -r requirements.txt
+python tools\validate_outputs.py
 ```
 
-Split the generated dataset:
+### 4. Split and train
 
 ```powershell
 python training-model\main\split.py
-```
-
-Train the models:
-
-```powershell
 python training-model\main\train.py
 ```
 
-The training script saves:
-
-- `results\models\severity_classifier.joblib`
-- `results\models\peak_infected_regressor.joblib`
-- `results\models\total_deaths_regressor.joblib`
-
-Generate research-paper evaluation outputs:
+### 5. Generate evaluation outputs
 
 ```powershell
 python training-model\main\evaluate_research_results.py
 ```
 
-This saves confusion matrix figures, classification metrics, regression metrics,
-and actual-vs-predicted plots under `results\research\`.
+## Machine-Learning Models
 
-Train the aggregate daily infected-count LSTM:
+The final system trains three Random Forest models:
 
-```powershell
-python training-model\main\train_daily_lstm.py
+| Model | Task | Output |
+|---|---|---|
+| Random Forest Classifier | Classification | Low, medium, or high severity |
+| Random Forest Regressor | Regression | Peak infected count |
+| Random Forest Regressor | Regression | Total deaths |
+
+The models use disease, policy, demographic, climate, and simulation-duration
+features. The complete feature schema and model hyperparameters are recorded in
+`results\models\model_metadata.json` after training.
+
+The LSTM and Graph LSTM scripts are experimental extensions for temporal and
+regional forecasting. They are not used by the current dashboard prediction
+cards or the reported Random Forest metrics.
+
+## Simulation Model
+
+The simulator maintains the population identity:
+
+```text
+N = S(t) + I(t) + R(t) + D(t) + V(t)
 ```
 
-Train the graph-temporal LSTM:
+where `S` is susceptible, `I` is infected, `R` is recovered, `D` is deceased,
+and `V` is vaccinated.
 
-```powershell
-python training-model\main\train_graph_lstm.py
+The effective transmission rate combines disease, policy, demographic, and
+climate effects:
+
+```text
+beta_eff = beta
+            x policy_factor
+            x temperature_factor
+            x humidity_factor
+            x rainfall_factor
+            x child_contact_factor
 ```
 
-The neural scripts require PyTorch from `requirements.txt`.
+New infections, deaths, and recoveries are sampled using binomial distributions.
+The severity score is calculated as:
 
-Test a model on the real-world Our World in Data COVID-19 dataset:
-
-```powershell
-python training-model\main\train_real_world.py
+```text
+Risk_Score = Infected_Share + 2.5 x Death_Share
 ```
 
-This trains on earlier country-level history and evaluates 7-day-ahead
-predictions on later dates for cases and deaths per million.
+The thresholds are:
+
+```text
+Risk_Score < 0.20           Low
+0.20 <= Risk_Score < 0.50  Medium
+Risk_Score >= 0.50         High
+```
+
+## Generated Data
+
+### Scenario summary
+
+`epidemic_dataset.csv` stores one row per scenario, including input parameters,
+final compartment counts, peak infected count, total deaths, and severity.
+
+### Daily time series
+
+`daily_counts.csv` stores one row per scenario per day with compartment counts
+and daily transitions:
+
+```text
+scenario_id, day, susceptible, infected, recovered, deceased, vaccinated,
+new_infections, new_recoveries, new_deaths, new_vaccinations
+```
+
+### Regional graph data
+
+`graph_timeseries.csv` stores one row per scenario, region, and day.
+`graph_edges.csv` stores the connections between the eight simulated regions.
+The regional graph is a separate stochastic simulation used for visualization;
+its totals are not required to match the global daily time series exactly.
 
 ## Streamlit Dashboard
 
-Run the interactive dashboard:
+Start the dashboard with:
 
 ```powershell
 streamlit run app.py
 ```
 
-The dashboard lets you adjust scenario inputs, apply policy controls, view
-predicted severity and peak infection count, plot daily infection curves,
-inspect generated CSV data, and visualize node-level graph spread with
-NetworkX and Plotly.
+The dashboard provides controls for:
 
-Policy controls include:
+- population and initial infected count,
+- infection, recovery, and mortality rates,
+- simulation duration,
+- lockdown, masks, vaccination, and travel restriction,
+- median age and population ratios,
+- temperature, humidity, and rainfall.
 
-- lockdown strength
-- mask adoption
-- daily vaccination rate
-- travel restriction
+It displays predicted severity, peak infected count, total deaths, expected
+daily SIRD curves, policy effects, generated CSV data, and regional graph spread.
 
-## Current Model Tasks
+## Results
 
-- Classification: predict `severity` as `low`, `medium`, or `high`.
-- Regression: predict `peak_infected`.
-- Regression: predict `total_deaths`.
-- Daily LSTM: predict the next aggregate daily `infected` count.
-- Graph LSTM: predict the next day infected count for each graph node, then
-  sum node predictions for total daily infections.
-- Real-world forecaster: predict 7-day-ahead COVID cases and deaths per million
-  using the Our World in Data dataset.
+The current evaluation uses 1000 synthetic scenarios split into 800 training
+rows and 200 testing rows.
 
-## Epidemic Model
+| Task | Result |
+|---|---:|
+| Severity classification accuracy | 84.5% |
+| Peak infected prediction R² | 0.618 |
+| Total deaths prediction R² | 0.752 |
+| Peak infected MAE | 124.00 |
+| Total deaths MAE | 86.16 |
 
-The simulator now uses an SIRD-style compartment model:
+The classifier performs strongly for the low and high classes. The medium class
+requires improvement because it is a transitional risk range with fewer and
+more overlapping samples.
 
-```text
-Susceptible -> Infected -> Recovered
-                     \-> Deceased
-```
+## Validation
 
-Vaccination moves people out of the susceptible group, while policy controls
-reduce the effective transmission rate.
+The project has been checked using:
+
+- C++ compilation with warnings enabled.
+- Seed reproducibility checks.
+- Population-conservation checks.
+- Non-negative state validation.
+- Day-zero transition validation.
+- Python syntax validation.
+- Dataset splitting and Random Forest evaluation.
+- PowerShell workflow syntax validation.
+
+## Scope and Limitations
+
+- The primary dataset is synthetic and generated from model assumptions.
+- Results do not represent validated real-world epidemiological accuracy.
+- Reporting delays, testing availability, mobility, healthcare capacity, and
+  changing variants are not modeled.
+- The graph simulation is intended for regional visualization and experimentation.
+- LSTM and Graph LSTM extensions require additional data and computation.
+- The medium severity class has weaker recall than the other classes.
+
+## Future Work
+
+Potential extensions include:
+
+- real-world dataset integration and temporal validation,
+- uncertainty intervals and Monte Carlo confidence bands,
+- hospital-capacity and mobility features,
+- calibrated probabilities for severity classes,
+- improved class balancing for medium-severity scenarios,
+- automated CI testing and containerized deployment,
+- trained temporal and graph-temporal neural models.
