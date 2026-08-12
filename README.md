@@ -1,5 +1,7 @@
 # Epidemic Spread Simulation and Machine Learning
 
+![CI](https://github.com/Rafi-Sojan/Epidemic-Spread-Simulation/actions/workflows/ci.yml/badge.svg)
+
 An end-to-end, simulation-driven epidemic analysis system. The project uses a
 probabilistic C++ SIRD model to generate controlled epidemic scenarios and
 Python-based Random Forest models to predict outbreak severity, peak infected
@@ -76,7 +78,8 @@ Epidemic-Spread-Simulation/
 │
 ├── tools/
 │   ├── run_pipeline.ps1               # Complete Windows workflow
-│   └── validate_outputs.py             # Output contract checks
+│   ├── validate_outputs.py             # Output contract checks
+│   └── benchmark_models.py             # Reproducible model benchmarks
 │
 └── results/                            # Generated and Git-ignored
     ├── epidemic_dataset.csv
@@ -118,6 +121,25 @@ python -m pip install -r requirements-optional.txt
 The final reported project results use Random Forest models and do not require
 PyTorch.
 
+## CI/CD
+
+The repository uses GitHub Actions for continuous integration. Every push to
+the main branch and every pull request runs the following checks:
+
+- compile the C++ simulator with warnings enabled,
+- run a seeded simulation smoke test,
+- validate generated CSV outputs,
+- validate Python source syntax,
+- train the Random Forest models,
+- generate evaluation and benchmark metrics,
+- upload research evaluation outputs as workflow artifacts.
+
+The CI workflow is defined in `.github/workflows/ci.yml`. The CD workflow is
+defined in `.github/workflows/release.yml`; pushing a version tag such as
+`v1.0.0` creates a GitHub Release containing a source bundle. The dashboard is
+run locally or deployed separately because its hosting target is application-
+specific.
+
 ## Quick Start
 
 The recommended workflow compiles the simulator, generates seeded data,
@@ -137,6 +159,7 @@ The pipeline creates:
 - `results\test.csv`
 - trained model files under `results\models\`
 - evaluation outputs under `results\research\`
+- benchmark metrics under `results\research\benchmark_metrics.csv`
 
 ## Manual Workflow
 
@@ -180,6 +203,12 @@ python training-model\main\train.py
 
 ```powershell
 python training-model\main\evaluate_research_results.py
+```
+
+### 6. Generate model benchmarks
+
+```powershell
+python tools\benchmark_models.py
 ```
 
 ## Machine-Learning Models
@@ -298,6 +327,34 @@ rows and 200 testing rows.
 The classifier performs strongly for the low and high classes. The medium class
 requires improvement because it is a transitional risk range with fewer and
 more overlapping samples.
+
+## Benchmark Summary
+
+The following benchmark is calculated on the held-out 200-row test set from the
+1000-scenario synthetic dataset. The classification baseline always predicts the
+most frequent class. Regression baselines predict the training-set mean. Run
+`python tools\benchmark_models.py` to regenerate the machine-readable benchmark
+files under `results\research\`.
+
+| Benchmark | Result |
+|---|---:|
+| Severity accuracy | 84.5% |
+| Severity balanced accuracy | 59.1% |
+| Severity macro F1 | 58.2% |
+| Severity weighted F1 | 79.4% |
+| Majority-class baseline accuracy | 72.5% |
+| Accuracy improvement over baseline | 12.0 percentage points |
+| Peak infected MAE | 124.00 |
+| Peak infected RMSE | 291.97 |
+| Peak infected R² | 0.618 |
+| Peak infected mean-baseline MAE | 258.85 |
+| Total deaths MAE | 86.16 |
+| Total deaths RMSE | 168.39 |
+| Total deaths R² | 0.752 |
+| Total deaths mean-baseline MAE | 194.68 |
+
+Inference latency and model artifact size are hardware-dependent and are also
+recorded by the benchmark script rather than presented as universal claims.
 
 ## Validation
 

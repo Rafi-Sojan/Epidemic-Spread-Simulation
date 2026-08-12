@@ -1,0 +1,40 @@
+name: Continuous Delivery
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package-release:
+    name: Package source release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create source bundle
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          BUNDLE="epidemic-spread-simulation-${RELEASE_TAG}.zip"
+          zip -r "$BUNDLE" \
+            app.py \
+            README.md \
+            requirements.txt \
+            requirements-optional.txt \
+            .gitignore \
+            spread-simulation/simulation-generation-source-code \
+            training-model/main \
+            tools \
+            .github/workflows
+          echo "BUNDLE=$BUNDLE" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "$BUNDLE" --generate-notes --title "${{ github.ref_name }}"

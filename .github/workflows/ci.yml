@@ -1,0 +1,67 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, validate, and evaluate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install core Python dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Compile simulator
+        run: |
+          g++ -std=c++11 -O2 -Wall -Wextra -pedantic \
+            spread-simulation/simulation-generation-source-code/simulation.cpp \
+            -o spread-simulation/simulation
+
+      - name: Run reproducible simulation smoke test
+        run: |
+          ./spread-simulation/simulation 25 \
+            results/epidemic_dataset.csv \
+            results/daily_counts.csv \
+            results/graph_timeseries.csv \
+            results/graph_edges.csv \
+            42
+
+      - name: Validate generated outputs
+        run: python tools/validate_outputs.py
+
+      - name: Validate Python source syntax
+        run: python -m py_compile app.py training-model/main/*.py tools/*.py
+
+      - name: Split dataset and train models
+        run: |
+          python training-model/main/split.py
+          python training-model/main/train.py
+
+      - name: Evaluate and benchmark models
+        run: |
+          python training-model/main/evaluate_research_results.py
+          python tools/benchmark_models.py
+
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-evaluation
+          path: results/research/

@@ -37,6 +37,7 @@ try {
     & $Python "training-model\main\split.py"
     & $Python "training-model\main\train.py"
     & $Python "training-model\main\evaluate_research_results.py"
+    & $Python "tools\benchmark_models.py"
 
     Write-Host "Pipeline completed successfully."
 }
